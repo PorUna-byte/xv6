@@ -16,8 +16,7 @@ char* readstr(){
 int
 main(int argc,char* argv[])
 {
-  int num=MAXARG;
-  char* argv_[num];
+  char* argv_[MAXARG];
   int i=0;
   for(;i<argc-1;i++){
     argv_[i]=(char*)malloc(buf_size);

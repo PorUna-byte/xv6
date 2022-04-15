@@ -156,7 +156,9 @@ void            uartintr(void);
 void            uartputc(int);
 void            uartputc_sync(int);
 int             uartgetc(void);
-
+//vmcopyin.c
+int             copyin_new(pagetable_t pagetable, char *dst, uint64 srcva, uint64 len);
+int             copyinstr_new(pagetable_t pagetable, char *dst, uint64 srcva, uint64 max);
 // vm.c
 void            kvminit(void);
 void            kvminithart(void);
@@ -178,7 +180,11 @@ uint64          walkaddr(pagetable_t, uint64);
 int             copyout(pagetable_t, uint64, char *, uint64);
 int             copyin(pagetable_t, char *, uint64, uint64);
 int             copyinstr(pagetable_t, char *, uint64, uint64);
-
+void            vmprint(pagetable_t pagetable,int depth);
+pagetable_t     kvminit_perproc();
+void            kvmmap_perproc(pagetable_t kernel_pagetable_perproc,uint64 va, uint64 pa, uint64 sz, int perm);
+void            freewalk(pagetable_t pagetable);
+void            copy_pagetable(pagetable_t src_pgtbl,pagetable_t des_pgtbl,uint64 start,uint64 end);
 // plic.c
 void            plicinit(void);
 void            plicinithart(void);
@@ -222,4 +228,5 @@ void            sockclose(struct sock *);
 int             sockread(struct sock *, uint64, int);
 int             sockwrite(struct sock *, uint64, int);
 void            sockrecvudp(struct mbuf*, uint32, uint16, uint16);
+
 #endif

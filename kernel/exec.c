@@ -38,6 +38,7 @@ exec(char *path, char **argv)
   if((pagetable = proc_pagetable(p)) == 0)
     goto bad;
 
+
   // Load program into memory.
   for(i=0, off=elf.phoff; i<elf.phnum; i++, off+=sizeof(ph)){
     if(readi(ip, 0, (uint64)&ph, off, sizeof(ph)) != sizeof(ph))
@@ -56,6 +57,8 @@ exec(char *path, char **argv)
       goto bad;
     if(loadseg(pagetable, ph.vaddr, ip, ph.off, ph.filesz) < 0)
       goto bad;
+    if(sz>=PLIC) //prevent user processes from growing larger than the PLIC address. 
+      goto bad;  
   }
   iunlockput(ip);
   end_op();
@@ -110,12 +113,16 @@ exec(char *path, char **argv)
     
   // Commit to the user image.
   oldpagetable = p->pagetable;
-  p->pagetable = pagetable;
+  p->pagetable = pagetable; //user virtual addr space has changed!
   p->sz = sz;
   p->trapframe->epc = elf.entry;  // initial program counter = main
   p->trapframe->sp = sp; // initial stack pointer
   proc_freepagetable(oldpagetable, oldsz);
-
+  //since we have freed memory in above operation, so we set do_free flag to 0 indicates we don't free memory again
+  uvmunmap(p->kernel_pagetable,0,PGROUNDUP(oldsz)/PGSIZE,0);
+  copy_pagetable(p->pagetable,p->kernel_pagetable,0,p->sz);
+  if(p->pid==1)
+    vmprint(p->pagetable,1);
   return argc; // this ends up in a0, the first argument to main(argc, argv)
 
  bad:

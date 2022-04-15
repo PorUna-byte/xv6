@@ -43,12 +43,20 @@ sys_sbrk(void)
 {
   int addr;
   int n;
-
+  struct proc *p = myproc();
   if(argint(0, &n) < 0)
     return -1;
-  addr = myproc()->sz;
+  addr = p->sz;
   if(growproc(n) < 0)
     return -1;
+  if(n>0){
+    copy_pagetable(p->pagetable,p->kernel_pagetable,addr,addr+n);
+  }
+  else{
+    uvmunmap(p->kernel_pagetable, PGROUNDUP(addr+n), -n/PGSIZE, 0);
+    // for(int j=addr-PGSIZE;j>=addr+n;j-=PGSIZE)
+    //   uvmunmap(p->kernel_pagetable,j,1,0);
+  }  
   return addr;
 }
 

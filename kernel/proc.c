@@ -6,6 +6,7 @@
 #include "proc.h"
 #include "defs.h"
 
+extern char etext[];  // kernel.ld sets this to end of kernel code.
 struct cpu cpus[NCPU];
 
 struct proc proc[NPROC];
@@ -31,15 +32,15 @@ procinit(void)
   for(p = proc; p < &proc[NPROC]; p++) {
       initlock(&p->lock, "proc");
 
-      // Allocate a page for the process's kernel stack.
-      // Map it high in memory, followed by an invalid
-      // guard page.
-      char *pa = kalloc();
-      if(pa == 0)
-        panic("kalloc");
-      uint64 va = KSTACK((int) (p - proc));
-      kvmmap(va, (uint64)pa, PGSIZE, PTE_R | PTE_W);
-      p->kstack = va;
+      // // Allocate a page for the process's kernel stack.
+      // // Map it high in memory, followed by an invalid
+      // // guard page.
+      // char *pa = kalloc();
+      // if(pa == 0)
+      //   panic("kalloc");
+      // uint64 va = KSTACK((int) (p - proc));
+      // kvmmap(va, (uint64)pa, PGSIZE, PTE_R | PTE_W);
+      // p->kstack = va;
   }
   kvminithart();
 }
@@ -120,6 +121,22 @@ found:
     release(&p->lock);
     return 0;
   }
+  // An empty kernel page table.
+  p->kernel_pagetable = kvminit_perproc();
+  if(p->kernel_pagetable == 0){
+    freeproc(p);
+    release(&p->lock);
+    return 0;
+  }
+  // Allocate a page for the process's kernel stack.
+  // Map it high in memory, followed by an invalid
+  // guard page.
+  char *pa = kalloc();
+  if(pa == 0)
+    panic("kalloc");
+  uint64 va = TRAMPOLINE - 2*PGSIZE ; //All processes has the same kernel stack virtual address 
+  kvmmap_perproc(p->kernel_pagetable,va, (uint64)pa, PGSIZE, PTE_R | PTE_W);
+  p->kstack = va;
 
   // Set up new context to start executing at forkret,
   // which returns to user space.
@@ -129,7 +146,22 @@ found:
 
   return p;
 }
-
+void 
+freekernelpagetable(pagetable_t kpagetable,uint64 sz)
+{
+  //unmap kernel page table mappings ,which is the reverse operation in kvminit_perproc
+  //We don't free shared resources,
+  uvmunmap(kpagetable,UART0,1,0);
+  uvmunmap(kpagetable,VIRTIO0,1,0);
+  uvmunmap(kpagetable,PLIC,0x400000/PGSIZE,0);
+  uvmunmap(kpagetable,KERNBASE,((uint64)etext-KERNBASE)/PGSIZE,0);
+  uvmunmap(kpagetable,(uint64)etext,(PHYSTOP-(uint64)etext)/PGSIZE,0);
+  uvmunmap(kpagetable,TRAMPOLINE,1,0);
+  uvmunmap(kpagetable,0,PGROUNDUP(sz)/PGSIZE,0);
+  //We free kernel stack for the process, recall that kernel stack has the same virtual address
+  uvmunmap(kpagetable,TRAMPOLINE-2*PGSIZE,1,1);
+  uvmfree(kpagetable,0);
+}
 // free a proc structure and the data hanging from it,
 // including user pages.
 // p->lock must be held.
@@ -141,7 +173,10 @@ freeproc(struct proc *p)
   p->trapframe = 0;
   if(p->pagetable)
     proc_freepagetable(p->pagetable, p->sz);
+  if(p->kernel_pagetable)
+    freekernelpagetable(p->kernel_pagetable,p->sz);
   p->pagetable = 0;
+  p->kernel_pagetable=0;
   p->sz = 0;
   p->pid = 0;
   p->parent = 0;
@@ -151,7 +186,6 @@ freeproc(struct proc *p)
   p->xstate = 0;
   p->state = UNUSED;
 }
-
 // Create a user page table for a given process,
 // with no user memory, but with trampoline pages.
 pagetable_t
@@ -220,7 +254,7 @@ userinit(void)
   // and data into it.
   uvminit(p->pagetable, initcode, sizeof(initcode));
   p->sz = PGSIZE;
-
+  copy_pagetable(p->pagetable,p->kernel_pagetable,0,p->sz);
   // prepare for the very first "return" from kernel to user.
   p->trapframe->epc = 0;      // user program counter
   p->trapframe->sp = PGSIZE;  // user stack pointer
@@ -273,10 +307,11 @@ fork(void)
     release(&np->lock);
     return -1;
   }
+
   np->sz = p->sz;
 
   np->parent = p;
-
+  copy_pagetable(np->pagetable,np->kernel_pagetable,0,np->sz);
   // copy saved user registers.
   *(np->trapframe) = *(p->trapframe);
 
@@ -473,8 +508,13 @@ scheduler(void)
         // before jumping back to us.
         p->state = RUNNING;
         c->proc = p;
+
+        w_satp(MAKE_SATP(p->kernel_pagetable));
+        sfence_vma();
+
         swtch(&c->context, &p->context);
 
+        kvminithart();
         // Process is done running for now.
         // It should have changed its p->state before coming back.
         c->proc = 0;

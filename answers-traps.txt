@@ -1,0 +1,9 @@
+a2
+li a1,12
+0x630
+0x30
+HE110 World
+i=0x726c6400  no change to 57616
+C calling-convention use a2-register as the second argument in printf function
+
+

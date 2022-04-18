@@ -67,12 +67,32 @@ usertrap(void)
     syscall();
   } else if((which_dev = devintr()) != 0){
     // ok
-  } else {
-    printf("usertrap(): unexpected scause %p pid=%d\n", r_scause(), p->pid);
-    printf("            sepc=%p stval=%p\n", r_sepc(), r_stval());
-    p->killed = 1;
-  }
-
+  } else if(r_scause()==13||r_scause()==15){
+    //Handle lazy allocation
+      uint64 va=r_stval();
+      if(va>p->sz||va<p->trapframe->sp){
+        p->killed=1;
+        goto out;
+      }
+      va = PGROUNDDOWN(va);
+      char* mem;
+      if((mem=kalloc())==0){
+        p->killed=1;
+        goto out;
+      }
+      memset(mem, 0, PGSIZE);  
+      if(mappages(myproc()->pagetable, va, PGSIZE, (uint64)mem, PTE_W|PTE_X|PTE_R|PTE_U) != 0){
+        kfree(mem);
+        p->killed=1;
+        goto out;
+      } 
+    }
+    else{
+      printf("usertrap(): unexpected scause %p pid=%d\n", r_scause(), p->pid);
+      printf("            sepc=%p stval=%p\n", r_sepc(), r_stval());
+      p->killed = 1;
+    }
+  out:  
   if(p->killed)
     exit(-1);
 

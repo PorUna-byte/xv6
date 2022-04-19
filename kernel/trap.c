@@ -10,7 +10,7 @@ struct spinlock tickslock;
 uint ticks;
 
 extern char trampoline[], uservec[], userret[];
-
+extern int PageRef_count[];
 // in kernelvec.S, calls kerneltrap().
 void kernelvec();
 
@@ -65,14 +65,45 @@ usertrap(void)
     intr_on();
 
     syscall();
-  } else if((which_dev = devintr()) != 0){
+  } 
+  else if((which_dev = devintr()) != 0){
     // ok
-  } else {
+  }
+  else if(r_scause()==13||r_scause()==15){
+    //Handle copy on write
+    uint64 va=r_stval();
+    uint64 pa;
+    pte_t *pte;
+    if((pte=walk(p->pagetable,va,0))==0||(*pte&PTE_C)==0){
+      p->killed=1;
+      goto out;
+    }
+    va = PGROUNDDOWN(va);
+    pa = PTE2PA(*pte);
+    //Here is a special case, current proc is the only proc that uses this physical page
+    if(get_count(pa)==1){
+      *pte |= PTE_W;//set PTE_W
+      *pte &= ~PTE_C;  //clear PTE_C
+      goto out;
+    }
+    char* mem;
+    if((mem=kalloc())==0){
+      p->killed=1;
+      goto out;
+    }
+    memmove(mem,(char*)pa,PGSIZE);
+
+    *pte = PA2PTE((uint64)mem) | PTE_FLAGS(*pte) | PTE_W;//set PTE_W
+    *pte &= (~PTE_C);  //clear PTE_C
+    // decrement a page's count each time any process drops the page from its page table
+    kfree((void*)pa);
+  }
+  else{
     printf("usertrap(): unexpected scause %p pid=%d\n", r_scause(), p->pid);
     printf("            sepc=%p stval=%p\n", r_sepc(), r_stval());
     p->killed = 1;
   }
-
+  out:    
   if(p->killed)
     exit(-1);
 

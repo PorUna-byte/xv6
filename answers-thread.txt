@@ -1,0 +1,9 @@
+Assume we have two threads thread_A, thread_B:
+ They excute concurrently, chances are that the following execution flow may happen:
+ thread_A: insert(key_A,value_A,&table[i],table[i])
+ thread_B: insert(key_B,value_B,&table[i],table[i])
+ thread_A: *p = e which is table[i]={key_A,value_A}
+ thread_B: *p = e which is table[i]={key_B,value_B}
+
+ now we see, {key_A,value_A} has been overwritten by {key_B,value_B} !
+ that is {key_A,value_A} is lost!

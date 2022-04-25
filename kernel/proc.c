@@ -530,7 +530,7 @@ yield(void)
 }
 
 // A fork child's very first scheduling by scheduler()
-// will swtch to forkret.
+// will switch to forkret.
 void
 forkret(void)
 {
@@ -552,6 +552,7 @@ forkret(void)
 
 // Atomically release lock and sleep on chan.
 // Reacquires lock when awakened.
+// Just like conditional wait in cpp lib
 void
 sleep(void *chan, struct spinlock *lk)
 {

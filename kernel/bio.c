@@ -31,7 +31,7 @@ struct {
   // Linked list of all buffers, through prev/next.
   // Sorted by how recently the buffer was used.
   // head.next is most recent, head.prev is least.
-  // struct buf free_head;
+  struct buf free_head;
 } bcache;
 typedef struct BUKT{
   struct spinlock lock;
@@ -54,25 +54,25 @@ binit(void)
     buckets[i].head.next = &buckets[i].head;
   }
 
-  // Create linked list of buffers
-  // bcache.free_head.prev = &bcache.free_head;
-  // bcache.free_head.next = &bcache.free_head;
-  // for(b = bcache.buf; b < bcache.buf+NBUF; b++){
-  //   b->next = bcache.free_head.next;
-  //   b->prev = &bcache.free_head;
-  //   initsleeplock(&b->lock, "buffer");
-  //   bcache.free_head.next->prev = b;
-  //   bcache.free_head.next = b;
-  // }
-  int idx=0;
+  //Create linked list of buffers
+  bcache.free_head.prev = &bcache.free_head;
+  bcache.free_head.next = &bcache.free_head;
   for(b = bcache.buf; b < bcache.buf+NBUF; b++){
-    b->next = buckets[idx].head.next;
-    b->prev = &buckets[idx].head;
+    b->next = bcache.free_head.next;
+    b->prev = &bcache.free_head;
     initsleeplock(&b->lock, "buffer");
-    buckets[idx].head.next->prev = b;
-    buckets[idx].head.next = b;
-    idx = (idx+1)%NHBK;
+    bcache.free_head.next->prev = b;
+    bcache.free_head.next = b;
   }
+  // int idx=0;
+  // for(b = bcache.buf; b < bcache.buf+NBUF; b++){
+  //   b->next = buckets[idx].head.next;
+  //   b->prev = &buckets[idx].head;
+  //   initsleeplock(&b->lock, "buffer");
+  //   buckets[idx].head.next->prev = b;
+  //   buckets[idx].head.next = b;
+  //   idx = (idx+1)%NHBK;
+  // }
 }
 
 // Look through buffer cache for block on device dev.
@@ -108,12 +108,10 @@ bget(uint dev, uint blockno)
       return b;
     }
   }
-  // we steal a buffer from other bucket
+  // we steal a buffer from global free list
   acquire(&bcache.lock);
   b = bcache.free_head.next;
   if(b!=&bcache.free_head){
-    b->refcnt = 1;
-    b->valid = 0;
     //remove the buffer from free list
     b->next->prev = b->prev;
     b->prev->next = b->next;
@@ -123,7 +121,11 @@ bget(uint dev, uint blockno)
     b->prev = &buckets[bktno].head;
     buckets[bktno].head.next = b;
 
-    printf("acquire a buffer from global free list\n");
+    b->dev = dev;
+    b->blockno = blockno;
+    b->valid = 0;
+    b->refcnt = 1;
+
     release(&bcache.lock);
     release(&buckets[bktno].lock);
     acquiresleep(&b->lock);
@@ -173,11 +175,13 @@ brelse(struct buf *b)
     // no one is waiting for it.
     b->next->prev = b->prev;
     b->prev->next = b->next;
-
-    b->prev = buckets[bktno].head.prev;
-    b->next= &buckets[bktno].head;
-    buckets[bktno].head.prev->next = b;
-    buckets[bktno].head.prev = b;
+    // put it on the free list
+    acquire(&bcache.lock);
+    b->next = bcache.free_head.next;
+    b->next->prev = b;
+    b->prev = &bcache.free_head;
+    bcache.free_head.next = b;
+    release(&bcache.lock);
   }
   release(&buckets[bktno].lock);
 }

@@ -22,8 +22,7 @@
 #include "defs.h"
 #include "fs.h"
 #include "buf.h"
-#define NHBK 7
-#define hash_fn(i) (i%NHBK)
+#define NHBK 13
 extern uint ticks;
 struct {
   struct spinlock lock;
@@ -35,7 +34,14 @@ typedef struct BUKT{
   char name[16];
 }Bucket;
 Bucket buckets[NHBK]; 
-
+static inline uint btime()
+{
+  return ticks;
+}
+static inline uint hash_fn(uint i)
+{
+  return (i%NHBK);
+} 
 void
 binit(void)
 {
@@ -86,7 +92,7 @@ bget(uint dev, uint blockno)
   }
   release(&buckets[bktno].lock);
   //It is OK to serialize eviction in bget 
-  //and the above release(&buckets[bktno].lock) may introduce a window for parallelism
+  //and the above release(&buckets[bktno].lock) may introduce a window for race condition
   struct buf *lrub=0;
   int oldest = -1; 
   acquire(&bcache.lock);
@@ -120,7 +126,7 @@ bget(uint dev, uint blockno)
     return b;
   }
   //Now we need to steal a lru buffer from other buckets
-  int prob;
+  uint prob;
   for(int i=1;i<NHBK;i++){
     prob = hash_fn(bktno+i);
     acquire(&buckets[prob].lock);
@@ -197,7 +203,7 @@ brelse(struct buf *b)
   acquire(&buckets[bktno].lock);
   b->refcnt--;
   if(b->refcnt==0)
-    b->timestamp=ticks;
+    b->timestamp=btime();
   release(&buckets[bktno].lock);
 }
 
@@ -206,7 +212,7 @@ bpin(struct buf *b) {
   uint bktno = hash_fn(b->blockno);
   acquire(&buckets[bktno].lock);
   b->refcnt++;
-  b->timestamp=ticks;
+  b->timestamp=btime();
   release(&buckets[bktno].lock);
 }
 
@@ -215,7 +221,7 @@ bunpin(struct buf *b) {
   uint bktno = hash_fn(b->blockno);
   acquire(&buckets[bktno].lock);
   b->refcnt--;
-  b->timestamp=ticks;
+  b->timestamp=btime();
   release(&buckets[bktno].lock);
 }
 

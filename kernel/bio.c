@@ -25,7 +25,7 @@
 #define NHBK 13
 extern uint ticks;
 struct {
-  struct spinlock lock;
+  struct spinlock lock; //unused
   struct buf buf[NBUF];
 } bcache;
 typedef struct BUKT{
@@ -90,23 +90,8 @@ bget(uint dev, uint blockno)
       return b;
     }
   }
-  release(&buckets[bktno].lock);
-  //It is OK to serialize eviction in bget 
-  //and the above release(&buckets[bktno].lock) may introduce a window for race condition
   struct buf *lrub=0;
   int oldest = -1; 
-  acquire(&bcache.lock);
-  acquire(&buckets[bktno].lock);
-  //so check again
-  for(b = buckets[bktno].head.next; b != &buckets[bktno].head; b = b->next){
-    if(b->dev == dev && b->blockno == blockno){
-      b->refcnt++;
-      release(&buckets[bktno].lock);
-      release(&bcache.lock);
-      acquiresleep(&b->lock);
-      return b;
-    }
-  }
   // search for free buffer from current bucket first.
   for(b = buckets[bktno].head.prev; b != &buckets[bktno].head; b = b->prev){
     if(b->refcnt == 0 && oldest >= b->timestamp) {
@@ -121,7 +106,6 @@ bget(uint dev, uint blockno)
     b->valid = 0;
     b->refcnt = 1;
     release(&buckets[bktno].lock);
-    release(&bcache.lock);
     acquiresleep(&b->lock);
     return b;
   }
@@ -155,14 +139,12 @@ bget(uint dev, uint blockno)
 
       release(&buckets[prob].lock);
       release(&buckets[bktno].lock);
-      release(&bcache.lock);
       acquiresleep(&b->lock);
       return b;
     } 
     release(&buckets[prob].lock);
   }
   release(&buckets[bktno].lock);
-  release(&bcache.lock);
   panic("bget: no buffers");
 }
 
@@ -202,8 +184,7 @@ brelse(struct buf *b)
 
   acquire(&buckets[bktno].lock);
   b->refcnt--;
-  if(b->refcnt==0)
-    b->timestamp=btime();
+  b->timestamp=btime();
   release(&buckets[bktno].lock);
 }
 

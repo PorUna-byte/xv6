@@ -22,12 +22,16 @@
 #include "defs.h"
 #include "fs.h"
 #include "buf.h"
-#define NHBK 7
+#define NHBK 13
 #define hash_fn(i) (i%NHBK)
-extern uint ticks;
 struct {
   struct spinlock lock;
   struct buf buf[NBUF];
+
+  // Linked list of all buffers, through prev/next.
+  // Sorted by how recently the buffer was used.
+  // head.next is most recent, head.prev is least.
+  struct buf free_head;
 } bcache;
 typedef struct BUKT{
   struct spinlock lock;
@@ -49,18 +53,16 @@ binit(void)
     buckets[i].head.prev = &buckets[i].head;
     buckets[i].head.next = &buckets[i].head;
   }
-  //Assign buffer uniformly first
-  int idx=0;
+
+  //Create linked list of buffers
+  bcache.free_head.prev = &bcache.free_head;
+  bcache.free_head.next = &bcache.free_head;
   for(b = bcache.buf; b < bcache.buf+NBUF; b++){
-    b->valid = 0;
-    b->refcnt = 0;
-    b->timestamp =0;
+    b->next = bcache.free_head.next;
+    b->prev = &bcache.free_head;
     initsleeplock(&b->lock, "buffer");
-    b->next = buckets[idx].head.next;
-    b->prev = &buckets[idx].head;
-    buckets[idx].head.next->prev = b;
-    buckets[idx].head.next = b;
-    idx = (idx+1)%NHBK;
+    bcache.free_head.next->prev = b;
+    bcache.free_head.next = b;
   }
 }
 
@@ -72,8 +74,7 @@ bget(uint dev, uint blockno)
 {
   struct buf *b;
   uint bktno = hash_fn(blockno);
-  //we will compare oldest with timestamp, which is a unsigned int, hence oldest will be viewed as an unsigned int
-  //So -1 is the largest number in unsigned int! 
+
   acquire(&buckets[bktno].lock);
   // Is the block already cached in the corresponding bucket?
   for(b = buckets[bktno].head.next; b != &buckets[bktno].head; b = b->next){
@@ -84,79 +85,44 @@ bget(uint dev, uint blockno)
       return b;
     }
   }
-  release(&buckets[bktno].lock);
-  //It is OK to serialize eviction in bget 
-  //and the above release(&buckets[bktno].lock) may introduce a window for parallelism
-  struct buf *lrub=0;
-  int oldest = -1; 
-  acquire(&bcache.lock);
-  acquire(&buckets[bktno].lock);
-  //so check again
-  for(b = buckets[bktno].head.next; b != &buckets[bktno].head; b = b->next){
-    if(b->dev == dev && b->blockno == blockno){
-      b->refcnt++;
-      release(&buckets[bktno].lock);
-      release(&bcache.lock);
-      acquiresleep(&b->lock);
-      return b;
-    }
-  }
-  // search for free buffer from current bucket first.
+
+  // Not cached in the corresponding bucket.
+  // Recycle the least recently used (LRU) unused buffer.
   for(b = buckets[bktno].head.prev; b != &buckets[bktno].head; b = b->prev){
-    if(b->refcnt == 0 && oldest >= b->timestamp) {
-      oldest = b->timestamp;
-      lrub = b;
-    }
-  }
-  b = lrub;
-  if(b){
-    b->dev = dev;
-    b->blockno = blockno;
-    b->valid = 0;
-    b->refcnt = 1;
-    release(&buckets[bktno].lock);
-    release(&bcache.lock);
-    acquiresleep(&b->lock);
-    return b;
-  }
-  //Now we need to steal a lru buffer from other buckets
-  int prob;
-  for(int i=1;i<NHBK;i++){
-    prob = hash_fn(bktno+i);
-    acquire(&buckets[prob].lock);
-    for(b=buckets[prob].head.next;b!=&buckets[prob].head;b=b->next){
-      if(b->refcnt==0 && oldest>=b->timestamp){
-        oldest=b->timestamp;
-        lrub = b;
-      }     
-    }
-    b=lrub;
-    if(b){
-      //remove the buffer from other bucket
-      b->next->prev = b->prev;
-      b->prev->next = b->next;
-
-      //Add the buffer to the corresponding bucket
-      b->next = buckets[bktno].head.next;
-      b->next->prev = b;
-      b->prev = &buckets[bktno].head;
-      buckets[bktno].head.next = b;
-
+    if(b->refcnt == 0) {
       b->dev = dev;
       b->blockno = blockno;
       b->valid = 0;
       b->refcnt = 1;
-
-      release(&buckets[prob].lock);
       release(&buckets[bktno].lock);
-      release(&bcache.lock);
       acquiresleep(&b->lock);
       return b;
-    } 
-    release(&buckets[prob].lock);
+    }
   }
-  release(&buckets[bktno].lock);
-  release(&bcache.lock);
+  // we steal a buffer from global free list
+  acquire(&bcache.lock);
+  b = bcache.free_head.next;
+  if(b!=&bcache.free_head){
+    //remove the buffer from free list
+    b->next->prev = b->prev;
+    b->prev->next = b->next;
+    //Add the buffer to corresponding bucket
+    b->next = buckets[bktno].head.next;
+    b->next->prev = b;
+    b->prev = &buckets[bktno].head;
+    buckets[bktno].head.next = b;
+
+    b->dev = dev;
+    b->blockno = blockno;
+    b->valid = 0;
+    b->refcnt = 1;
+
+    release(&bcache.lock);
+    release(&buckets[bktno].lock);
+    acquiresleep(&b->lock);
+    return b;
+  }
+
   panic("bget: no buffers");
 }
 
@@ -196,8 +162,18 @@ brelse(struct buf *b)
 
   acquire(&buckets[bktno].lock);
   b->refcnt--;
-  if(b->refcnt==0)
-    b->timestamp=ticks;
+  if (b->refcnt == 0) {
+    // no one is waiting for it.
+    b->next->prev = b->prev;
+    b->prev->next = b->next;
+    // put it on the free list
+    acquire(&bcache.lock);
+    b->next = bcache.free_head.next;
+    b->next->prev = b;
+    b->prev = &bcache.free_head;
+    bcache.free_head.next = b;
+    release(&bcache.lock);
+  }
   release(&buckets[bktno].lock);
 }
 
@@ -206,7 +182,6 @@ bpin(struct buf *b) {
   uint bktno = hash_fn(b->blockno);
   acquire(&buckets[bktno].lock);
   b->refcnt++;
-  b->timestamp=ticks;
   release(&buckets[bktno].lock);
 }
 
@@ -215,7 +190,6 @@ bunpin(struct buf *b) {
   uint bktno = hash_fn(b->blockno);
   acquire(&buckets[bktno].lock);
   b->refcnt--;
-  b->timestamp=ticks;
   release(&buckets[bktno].lock);
 }
 

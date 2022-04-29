@@ -316,6 +316,32 @@ sys_open(void)
     }
   }
 
+  if(ip->type == T_SYMLINK && (omode & O_NOFOLLOW)==0){
+    int recur; //used for preventing symbolic link cycle
+    for(recur=0;recur<10;recur++){
+      if(readi(ip,0,(uint64)path,0,MAXPATH)<=0){
+        iunlockput(ip);
+        end_op();
+        return -1;
+      }
+      iunlockput(ip); //used for preventing deadlock
+      //we need to recursively follow it until a non-link file is reached
+      if((ip=namei(path))==0){
+        end_op();
+        return -1;
+      }
+      ilock(ip);
+      if(ip->type!=T_SYMLINK)
+        break;
+    }
+    //10 means a cycle :)
+    if(recur==10){
+      iunlockput(ip);
+      end_op();
+      return -1;
+    }
+  }  
+
   if(ip->type == T_DEVICE && (ip->major < 0 || ip->major >= NDEV)){
     iunlockput(ip);
     end_op();
@@ -482,5 +508,27 @@ sys_pipe(void)
     fileclose(wf);
     return -1;
   }
+  return 0;
+}
+uint64 
+sys_symlink(void)
+{
+  struct inode *ip;
+  char target[MAXPATH],path[MAXPATH]; //we only consider symbolic links to file
+  if(argstr(0,target,MAXPATH)<0 || argstr(1,path,MAXPATH)<0)
+    return -1;
+
+  begin_op();
+  if((ip = create(path, T_SYMLINK, 0, 0))==0){
+    end_op();
+    return -1;
+  }
+  if(writei(ip,0,(uint64)target,0,MAXPATH)<MAXPATH){
+    iunlockput(ip);
+    end_op();
+    return -1;
+  }
+  iunlockput(ip);
+  end_op();
   return 0;
 }

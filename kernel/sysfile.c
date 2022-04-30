@@ -519,6 +519,7 @@ sys_symlink(void)
     return -1;
 
   begin_op();
+  //create will return a locked ip, so we don't need to lock ip again.
   if((ip = create(path, T_SYMLINK, 0, 0))==0){
     end_op();
     return -1;

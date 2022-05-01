@@ -5,7 +5,10 @@
 #include "spinlock.h"
 #include "proc.h"
 #include "defs.h"
-
+#include "fcntl.h"
+#include "sleeplock.h"
+#include "fs.h"
+#include "file.h"
 struct spinlock tickslock;
 uint ticks;
 
@@ -67,12 +70,45 @@ usertrap(void)
     syscall();
   } else if((which_dev = devintr()) != 0){
     // ok
-  } else {
+  } 
+  else {
+    if(r_scause()==13||r_scause()==15){
+      struct proc *p=myproc();
+      uint64 va=r_stval();
+      struct VMA *vmas=p->vmas;
+      for(int i=p->front;i!=p->tail;i=(i+1)%VMA_SIZE){
+        if(va>=vmas[i].addr&&va<vmas[i].addr+vmas[i].length){
+          //found a mmap-ed region
+          va=PGROUNDDOWN(va);
+          char* mem;
+          if((mem=kalloc())==0){
+            p->killed=1;
+            goto out;
+          }
+          memset(mem, 0, PGSIZE);
+          int PTEs=0;
+          if(PROT_READ & vmas[i].prot)
+            PTEs |= PTE_R;
+          if(PROT_WRITE & vmas[i].prot)
+            PTEs |= PTE_W;
+          PTEs |= PTE_U;    
+          if(mappages(p->pagetable, va, PGSIZE, (uint64)mem, PTEs) != 0){
+            kfree(mem);
+            p->killed=1;
+            goto out;
+          }
+          ilock(vmas[i].f->ip);
+          readi(vmas[i].f->ip,0,(uint64)mem,va-vmas[i].addr+vmas[i].offset,PGSIZE);
+          iunlock(vmas[i].f->ip);
+          goto out;
+        }
+      }
+    }
     printf("usertrap(): unexpected scause %p pid=%d\n", r_scause(), p->pid);
     printf("            sepc=%p stval=%p\n", r_sepc(), r_stval());
     p->killed = 1;
   }
-
+out:
   if(p->killed)
     exit(-1);
 

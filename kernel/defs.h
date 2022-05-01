@@ -33,7 +33,7 @@ void            fileinit(void);
 int             fileread(struct file*, uint64, int n);
 int             filestat(struct file*, uint64 addr);
 int             filewrite(struct file*, uint64, int n);
-
+void            filerls(struct file *f);
 // fs.c
 void            fsinit(int);
 int             dirlink(struct inode*, char*, uint);
@@ -171,7 +171,7 @@ uint64          walkaddr(pagetable_t, uint64);
 int             copyout(pagetable_t, uint64, char *, uint64);
 int             copyin(pagetable_t, char *, uint64, uint64);
 int             copyinstr(pagetable_t, char *, uint64, uint64);
-
+void            freewalk(pagetable_t pagetable);
 // plic.c
 void            plicinit(void);
 void            plicinithart(void);

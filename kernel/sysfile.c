@@ -484,3 +484,100 @@ sys_pipe(void)
   }
   return 0;
 }
+uint64
+sys_mmap(void)
+{
+  struct proc *p=myproc();
+  uint64 addr ; //Assumed to be chosen by kernel
+  int idx=p->tail;
+  struct VMA *vmas=p->vmas;
+
+  if(argaddr(0,&addr)<0)
+    return -1;
+  else if(addr==0)
+      addr = PGROUNDUP(p->map_end);//an unused region in the process's address space in which to map the file
+  vmas[idx].addr = addr;    
+  if(argint(1,&vmas[idx].length)<0)
+    return -1;
+  if(argint(2,&vmas[idx].prot)<0)
+    return -1;
+  if(argint(3,&vmas[idx].flags)<0)
+    return -1;
+  if(argint(5,&vmas[idx].offset)<0)
+    return -1;
+  if(argfd(4,&vmas[idx].fd,&vmas[idx].f)<0)
+    return -1;
+  if(!vmas[idx].f->readable&&(vmas[idx].prot & PROT_READ))
+    return -1;
+  if(!vmas[idx].f->writable&&(vmas[idx].prot & PROT_WRITE)&&!(vmas[idx].flags & MAP_PRIVATE))
+    return -1;    
+  filedup(vmas[idx].f); // increase the file's reference count so that the structure doesn't disappear when the file is closed
+  p->tail=(p->tail+1)%VMA_SIZE;
+  p->map_end = addr + vmas[idx].length;
+  return addr;
+}
+//you can assume that it will either unmap at the start,
+//or at the end, or the whole region (but not punch a hole in the middle of a region). 
+uint64
+sys_munmap(void)
+{
+  uint64 addr;
+  int length;
+  struct proc *p=myproc();
+  struct VMA *vmas=p->vmas;
+  if(argaddr(0,&addr)<0)
+    return -1;
+  if(argint(1,&length)<0)
+    return -1;
+  //find the VMA for the address range and unmap the specified pages 
+  //unmap from start(i.e. front)
+  if(vmas[p->front].addr==addr){
+    for(int i=p->front;i!=p->tail;i=(i+1)%VMA_SIZE){
+      if(vmas[i].addr+vmas[i].length<=addr+length){
+        //removes all pages of a previous map
+        filerls(vmas[i].f);
+        if(vmas[i].flags & MAP_SHARED)
+          filewrite(vmas[i].f,vmas[i].addr,vmas[i].length);
+        p->front=(p->front+1)%VMA_SIZE; //Advance p->front to indicate the map has been undone
+        uvmunmap(p->pagetable,vmas[i].addr,vmas[i].length/PGSIZE,1);
+        p->map_start=vmas[i].addr+vmas[i].length;  
+      }
+      else if(vmas[i].addr < addr+length){
+        //removes only a portion of a previous map
+        if(vmas[i].flags & MAP_SHARED)
+          filewrite(vmas[i].f,vmas[i].addr,addr+length-vmas[i].addr);
+        uvmunmap(p->pagetable,vmas[i].addr,(addr+length-vmas[i].addr)/PGSIZE,1);
+        vmas[i].offset=addr+length-vmas[i].addr;
+        vmas[i].length=vmas[i].addr+vmas[i].length-(addr+length);
+        vmas[i].addr=addr+length; //shrink the map range
+        p->map_start=vmas[i].addr;
+      }
+    }
+    if(p->front==p->tail) //unmap the whole mapp-ed region     
+      return 0; 
+  }
+  //unmap from end(i.e. tail)
+  else if(vmas[p->tail].addr+vmas[p->tail].length==addr+length){
+    for(int i=p->tail;i!=p->front;i=(i+VMA_SIZE-1)%VMA_SIZE){
+      if(vmas[i].addr>=addr){
+        //removes all page of a previous map
+        filerls(vmas[i].f);
+        if(vmas[i].flags & MAP_SHARED)
+          filewrite(vmas[i].f,vmas[i].addr,vmas[i].length);
+        p->tail=(p->tail+VMA_SIZE-1)%VMA_SIZE; //Advance p->front to indicate the map has been undone
+        uvmunmap(p->pagetable,vmas[i].addr,vmas[i].length/PGSIZE,1);
+        p->map_end=vmas[i].addr;          
+      }
+      else if(vmas[i].addr+vmas[i].length>addr){
+        //removes only a portion of a previous map
+        if(vmas[i].flags & MAP_SHARED)
+          filewrite(vmas[i].f,addr,vmas[i].addr+vmas[i].length-addr);
+        uvmunmap(p->pagetable,addr,(vmas[i].addr+vmas[i].length-addr)/PGSIZE,1);
+        
+        vmas[i].length=addr-vmas[i].addr; //shrink the map range  
+        p->map_end=addr;  
+      }
+    }
+  }
+  return 0;
+}

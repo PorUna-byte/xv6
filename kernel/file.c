@@ -54,6 +54,13 @@ filedup(struct file *f)
   release(&ftable.lock);
   return f;
 }
+void 
+filerls(struct file *f)
+{
+  acquire(&ftable.lock);
+  f->ref--;
+  release(&ftable.lock);  
+}
 
 // Close file f.  (Decrement ref count, close when reaches 0.)
 void

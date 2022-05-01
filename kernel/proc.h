@@ -1,3 +1,4 @@
+#define VMA_SIZE 16
 // Saved registers for kernel context switches.
 struct context {
   uint64 ra;
@@ -80,6 +81,16 @@ struct trapframe {
   /* 280 */ uint64 t6;
 };
 
+struct VMA{
+  uint64 addr;   //starting u.v.a of a mapped region in the proc's u.v.a.space, which is choosen by kernel
+  int length; //the length of a region(i.e. number of bytes)
+  int offset; //offset into file, which is assumed to be 0
+  int prot;      //Read-able, Write-able
+  int flags;     //MAP_SHARED---modification should be written back to the file,MAP_PRIVATE---should not
+  int fd;        //open file descriptor of the file to map
+  struct file *f; //file pointer to the open file that needs map
+};
+
 enum procstate { UNUSED, SLEEPING, RUNNABLE, RUNNING, ZOMBIE };
 
 // Per-process state
@@ -103,4 +114,9 @@ struct proc {
   struct file *ofile[NOFILE];  // Open files
   struct inode *cwd;           // Current directory
   char name[16];               // Process name (debugging)
+  struct VMA vmas[VMA_SIZE];         // record mmap-ed region
+  int front;                   // front of vmas, we organize the array as a circular array
+  int tail;                    // tail of vmas
+  uint64 map_start;            // The region [MAXVA/2,MAXVA] will be used for mmap
+  uint64 map_end;
 };

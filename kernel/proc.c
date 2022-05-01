@@ -133,7 +133,8 @@ found:
   memset(&p->context, 0, sizeof(p->context));
   p->context.ra = (uint64)forkret;
   p->context.sp = p->kstack + PGSIZE;
-
+  p->map_start = MAXVA/2;
+  p->map_end = p->map_start;
   return p;
 }
 
@@ -146,8 +147,11 @@ freeproc(struct proc *p)
   if(p->trapframe)
     kfree((void*)p->trapframe);
   p->trapframe = 0;
-  if(p->pagetable)
+  if(p->pagetable){
     proc_freepagetable(p->pagetable, p->sz);
+    uvmunmap(p->pagetable,p->map_start,(p->map_end-p->map_start)/PGSIZE,1);
+    freewalk(p->pagetable);
+  }  
   p->pagetable = 0;
   p->sz = 0;
   p->pid = 0;
@@ -157,6 +161,10 @@ freeproc(struct proc *p)
   p->killed = 0;
   p->xstate = 0;
   p->state = UNUSED;
+  p->front = 0;
+  p->tail = 0;
+  p->map_start = MAXVA/2;
+  p->map_end = MAXVA/2;
 }
 
 // Create a user page table for a given process,
@@ -279,6 +287,15 @@ fork(void)
     freeproc(np);
     release(&np->lock);
     return -1;
+  }
+  //copy VMAs from parent to child
+  np->front = p->front;
+  np->tail = p->tail;
+  np->map_start = p->map_start;
+  np->map_end = p->map_end;
+  for(int i=p->front;i!=p->tail;i=(i+1)%VMA_SIZE){
+    np->vmas[i]=p->vmas[i];
+    filedup(p->vmas[i].f);
   }
   np->sz = p->sz;
 

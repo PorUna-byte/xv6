@@ -147,11 +147,8 @@ freeproc(struct proc *p)
   if(p->trapframe)
     kfree((void*)p->trapframe);
   p->trapframe = 0;
-  if(p->pagetable){
+  if(p->pagetable)
     proc_freepagetable(p->pagetable, p->sz);
-    uvmunmap(p->pagetable,p->map_start,(p->map_end-p->map_start)/PGSIZE,1);
-    freewalk(p->pagetable);
-  }  
   p->pagetable = 0;
   p->sz = 0;
   p->pid = 0;
@@ -374,6 +371,7 @@ exit(int status)
   iput(p->cwd);
   end_op();
   p->cwd = 0;
+  uvmunmap(p->pagetable,p->map_start,(p->map_end-p->map_start)/PGSIZE,1);
 
   // we might re-parent a child to init. we can't be precise about
   // waking up init, since we can't acquire its lock once we've

@@ -547,7 +547,7 @@ sys_munmap(void)
         if(vmas[i].flags & MAP_SHARED)
           filewrite(vmas[i].f,vmas[i].addr,addr+length-vmas[i].addr);
         uvmunmap(p->pagetable,vmas[i].addr,(addr+length-vmas[i].addr)/PGSIZE,1);
-        vmas[i].offset=addr+length-vmas[i].addr;
+        vmas[i].offset+=addr+length-vmas[i].addr;
         vmas[i].length=vmas[i].addr+vmas[i].length-(addr+length);
         vmas[i].addr=addr+length; //shrink the map range
         p->map_start=vmas[i].addr;

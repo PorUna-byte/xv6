@@ -133,8 +133,9 @@ found:
   memset(&p->context, 0, sizeof(p->context));
   p->context.ra = (uint64)forkret;
   p->context.sp = p->kstack + PGSIZE;
-  p->map_start = MAXVA/2;
-  p->map_end = p->map_start;
+  memset(p->vmas,0,sizeof(struct VMA)*VMA_SIZE);
+  p->map_start = p->map_end = MAXVA/2;
+  p->front=p->tail=0;
   return p;
 }
 

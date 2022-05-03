@@ -99,12 +99,12 @@
 // [E1000 3.3.3]
 struct tx_desc
 {
-  uint64 addr;
-  uint16 length;
-  uint8 cso;
-  uint8 cmd;
-  uint8 status;
-  uint8 css;
+  uint64 addr;      //Address of the buffer to be transmitted
+  uint16 length;    //the length of the buffer to be transmitted
+  uint8 cso;        //checksum offset
+  uint8 cmd;        //Transmit command 
+  uint8 status;     //Descriptor status
+  uint8 css;        //checksum start field
   uint16 special;
 };
 

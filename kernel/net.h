@@ -12,10 +12,10 @@ struct mbuf {
   char         buf[MBUF_SIZE]; // the backing store
 };
 
-char *mbufpull(struct mbuf *m, unsigned int len);
-char *mbufpush(struct mbuf *m, unsigned int len);
-char *mbufput(struct mbuf *m, unsigned int len);
-char *mbuftrim(struct mbuf *m, unsigned int len);
+char *mbufpull(struct mbuf *m, unsigned int len);  //pull from head
+char *mbufpush(struct mbuf *m, unsigned int len);  //push into head
+char *mbufput(struct mbuf *m, unsigned int len);   //put into tail
+char *mbuftrim(struct mbuf *m, unsigned int len);  //trim from tail
 
 // The above functions manipulate the size and position of the buffer:
 //            <- push            <- trim
@@ -25,7 +25,7 @@ char *mbuftrim(struct mbuf *m, unsigned int len);
 //
 // These marcos automatically typecast and determine the size of header structs.
 // In most situations you should use these instead of the raw ops above.
-#define mbufpullhdr(mbuf, hdr) (typeof(hdr)*)mbufpull(mbuf, sizeof(hdr))
+#define mbufpullhdr(mbuf, hdr) (typeof(hdr)*)mbufpull(mbuf, sizeof(hdr)) 
 #define mbufpushhdr(mbuf, hdr) (typeof(hdr)*)mbufpush(mbuf, sizeof(hdr))
 #define mbufputhdr(mbuf, hdr) (typeof(hdr)*)mbufput(mbuf, sizeof(hdr))
 #define mbuftrimhdr(mbuf, hdr) (typeof(hdr)*)mbuftrim(mbuf, sizeof(hdr))

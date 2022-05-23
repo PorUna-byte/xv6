@@ -81,6 +81,8 @@ bget(uint dev, uint blockno)
   //we will compare oldest with timestamp, which is a unsigned int, hence oldest will be viewed as an unsigned int
   //So -1 is the largest number in unsigned int! 
   acquire(&buckets[bktno].lock);
+  struct buf *lrub=0;
+  int oldest = -1; 
   // Is the block already cached in the corresponding bucket?
   for(b = buckets[bktno].head.next; b != &buckets[bktno].head; b = b->next){
     if(b->dev == dev && b->blockno == blockno){
@@ -89,14 +91,10 @@ bget(uint dev, uint blockno)
       acquiresleep(&b->lock);
       return b;
     }
-  }
-  struct buf *lrub=0;
-  int oldest = -1; 
-  // search for free buffer from current bucket first.
-  for(b = buckets[bktno].head.prev; b != &buckets[bktno].head; b = b->prev){
-    if(b->refcnt == 0 && oldest >= b->timestamp) {
+    // search for free buffer from current bucket first.
+    else if(b->refcnt==0 && oldest >= b->timestamp){
       oldest = b->timestamp;
-      lrub = b;
+      lrub = b;      
     }
   }
   b = lrub;

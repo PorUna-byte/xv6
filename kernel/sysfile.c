@@ -551,6 +551,7 @@ sys_munmap(void)
         vmas[i].length=vmas[i].addr+vmas[i].length-(addr+length);
         vmas[i].addr=addr+length; //shrink the map range
         p->map_start=vmas[i].addr;
+        break;
       }
     }
     if(p->front==p->tail) //unmap the whole mapp-ed region     
@@ -576,6 +577,7 @@ sys_munmap(void)
         
         vmas[i].length=addr-vmas[i].addr; //shrink the map range  
         p->map_end=addr;  
+        break;
       }
     }
   }
